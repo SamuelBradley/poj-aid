@@ -1,0 +1,12 @@
+{
+  "prefix": "!",
+  "twitchUsername": "PojAid",
+  "defaultChatChannel": "twitch-chat", 
+  "connections": [
+    {
+      "twitchChannel": "#moredhel88",
+      "discordGuild": "480587493490819083",
+      "discordChannel": "twitch-chat"
+    }
+  ]
+}
