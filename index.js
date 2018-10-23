@@ -48,11 +48,13 @@ function onTwitchMessageHandler (target, context, msg, self) {
   //If it's a command process it
   if(!botUtils.processCommand(commandPrefix, msg, twitchCommands, context.username, context, target))
   {
-    let con = connections.get(target);
+    let con = connections.get(target.replace('#',''));
+
     if(con.discordChannelId == null)
     {
       let chan = discordBot.guilds.get(con.discordGuild).channels.find('name', con.discordChannel);
       con.discordChannelId = chan.id;
+      console.log(`Set channelId to ${chan.id} `);
     }
 
     discordBot.guilds.get(con.discordGuild).channels.get(con.discordChannelId).send(`***${context.username}***: ${msg}`)
@@ -169,14 +171,16 @@ function settwitch(target, object, params){
   }
   
   let end = false;
+  let dc = botconfig.defaultChatChannel;
+
   botconfig.connections.forEach(e => {
-    if(e.discordGuild === message.guild.id)
+    if(e.discordGuild === object.guild.id)
     {
       end = true;
       if(e.twitchChannel)
       {
         console.log('Leaving twitch channel ' + e.twitchChannel);
-        twitch.part(e.twitchChannel);
+        twitchClient.part(e.twitchChannel);
       }
      
       e.twitchChannel = params[0];
@@ -191,10 +195,8 @@ function settwitch(target, object, params){
   if(!end)
   {
     console.log("Couldn't find discord channel in config");
-    let dc = botconfig.defaultChatChannel;
     if(params.length > 1)
       dc = params[1];
-
     
     var newConnection = {
       twitchChannel: params[0],
@@ -206,7 +208,7 @@ function settwitch(target, object, params){
 
   //Join the channel
   console.log('Joining twitch channel ' + params[0]);
-  twitch.join(params[0]);
+  twitchClient.join(params[0]);
   
   updateConfig('Updating ' + configFileName + ' with new twitch conncetion ' + params[0]);
 
