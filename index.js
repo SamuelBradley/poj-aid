@@ -109,6 +109,23 @@ discordBot.on("ready", async () => {
   initialiseTwitch(); 
 });
 
+discordBot.on("guildCreate", async guild => {
+  console.log(`${discordBot.user.username} has joined ${guild.name}!`);
+  console.log(`Updating config file...`);
+  
+  if(connections.get(guild.id) == null)
+  {
+    var newConnection = {
+      discordGuild: guild.id,
+      discordChannel: botconfig.defaultChatChannel
+    } 
+    botconfig.connections.push(newConnection); 
+    updateConfig('Updating ' + configFileName + ' with new discord connection ' + guild.name);
+  }
+
+  
+});
+
 discordBot.on("message", async message => {
   if(message.author.bot) return;
   if(message.channel.type === "dm") return;
@@ -125,10 +142,12 @@ discordBot.on("message", async message => {
 
 discordBot.login(secret.token);
 
+//Discord Command
 function hello(target, object, params){
   return object.channel.send("Hello " + object.author.username);
 }
 
+//Discord Command
 function twitch(target, object, params){
   let end = false;
   botconfig.connections.forEach(e => {
@@ -142,6 +161,7 @@ function twitch(target, object, params){
   return object.channel.send("There is no twitch channel set for this guild. Use the command !settwich TWITCH_CHANNEL DISCORD_CHANNEL");
 }
 
+//Discord Command
 function settwitch(target, object, params){
   if(params[0] == null)
   {
@@ -153,16 +173,24 @@ function settwitch(target, object, params){
     if(e.discordGuild === message.guild.id)
     {
       end = true;
+      if(e.twitchChannel)
+      {
+        console.log('Leaving twitch channel ' + e.twitchChannel);
+        twitch.part(e.twitchChannel);
+      }
+     
       e.twitchChannel = params[0];
       if(params.length > 1)
       {
         e.discordChannel = params[1];
       }
+      
     }
   });  
   
   if(!end)
   {
+    console.log("Couldn't find discord channel in config");
     let dc = botconfig.defaultChatChannel;
     if(params.length > 1)
       dc = params[1];
@@ -173,14 +201,23 @@ function settwitch(target, object, params){
       discordGuild: object.guild.id,
       discordChannel: dc
     } 
-    botconfig.connections.push(newConnection);
+    botconfig.connections.push(newConnection);   
   }
+
+  //Join the channel
+  console.log('Joining twitch channel ' + params[0]);
+  twitch.join(params[0]);
   
-  fs.writeFile(configFileName, JSON.stringify(botconfig, null, 2), function (err) {
-    if (err) return console.log(err);
-    console.log('Updating ' + configFileName + ' with new twitch conncetion ' + params[0]);
-    updateConnections();
-  });
+  updateConfig('Updating ' + configFileName + ' with new twitch conncetion ' + params[0]);
 
   return object.channel.send(`The twitch channel has been set to ${params[0]} messages will be posted in ${dc}` );
+}
+
+function updateConfig(note){
+  fs.writeFile(configFileName, JSON.stringify(botconfig, null, 2), function (err) {
+    if (err) return console.log(err);
+    if(note) console.log(note);
+    //Update all the data structures with the latest information.
+    updateConnections();
+  });
 }
