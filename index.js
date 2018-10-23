@@ -108,6 +108,21 @@ discordBot.on("ready", async () => {
   console.log(`${discordBot.user.username} is online!`);
   console.log(`Loading twitch conncetions...`);
   updateConnections();
+  
+  //Make sure all existing guilds have an entry in the connections config
+  discordBot.guilds.forEach(g => {
+    
+    if(connections.get(g.id) == null)
+    {
+      var newConnection = {
+        discordGuild: g.id,
+        discordChannel: botconfig.defaultChatChannel
+      } 
+      botconfig.connections.push(newConnection); 
+      updateConfig('Updating ' + configFileName + ' with new discord connection ' + g.name);
+    }
+  });
+
   initialiseTwitch(); 
 });
 
