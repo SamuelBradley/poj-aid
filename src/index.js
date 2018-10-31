@@ -1,10 +1,40 @@
+const envResult =  require('dotenv').config()
 const botUtils = require('./botUtils');
 const fs = require('fs');
-const configFileName = "./botconfig.json";
-const botconfig = require(configFileName);
-const secret = require("./secret.json");
+var path = require('path');
+const botconfigdefault = require("./botconfig-default.json");
 const Discord = require("discord.js");
 const tmi = require('tmi.js')
+
+if(envResult.error)
+{
+  //Do nothing probably a docker build
+}
+
+const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
+const TWITCH_AUTH = process.env.TWITCH_AUTH;
+const TWITCH_CLIENT_ID = process.env.TWITCH_CLIENT_ID;
+
+//Server Path
+let configPath = process.env.CONFIG_PATH;
+if(configPath == null)
+{
+  //Local path
+  configPath = "../data/";
+}
+
+const configFileName = configPath + "botconfig.json";
+if (!fs.existsSync(path.resolve(__dirname,configFileName))) {
+  console.log(`${configFileName} does not exist, copying defaults`);
+  try {
+    fs.copyFileSync(path.resolve(__dirname,'./botconfig-default.json'), path.resolve(__dirname,configFileName));
+    console.log(`Copied default config to ${configFileName}`);
+  } catch (err) {
+    console.error(err)
+  }
+}
+
+const botconfig = require(configFileName);
 
 let discordBot = new Discord.Client({disableEveryone:true});
 
@@ -19,14 +49,14 @@ function initialiseTwitch() {
 
   opts = {
     options:{
-      clientId: secret.twitchClientId
+      clientId: TWITCH_CLIENT_ID
     },
     connection: {
       reconnect: true
     },
     identity: {
       username: botconfig.twitchUsername,
-      password: secret.twitchAuth
+      password: TWITCH_AUTH
     },
     channels: twitchChannels  
   }
@@ -157,7 +187,7 @@ discordBot.on("message", async message => {
 
 });
 
-discordBot.login(secret.token);
+discordBot.login(DISCORD_TOKEN);
 
 //Discord Command
 function hello(target, object, params){
@@ -231,7 +261,8 @@ function settwitch(target, object, params){
 }
 
 function updateConfig(note){
-  fs.writeFile(configFileName, JSON.stringify(botconfig, null, 2), function (err) {
+  console.log(`Writing to ${path.resolve(__dirname,configFileName)}`)
+  fs.writeFile(path.resolve(__dirname,configFileName), JSON.stringify(botconfig, null, 2), function (err) {
     if (err) return console.log(err);
     if(note) console.log(note);
     //Update all the data structures with the latest information.
