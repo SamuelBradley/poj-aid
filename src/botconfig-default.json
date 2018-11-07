@@ -2,6 +2,7 @@
   "prefix": "!",
   "twitchUsername": "PojAid",
   "defaultChatChannel": "twitch-chat",
+  "defaultClipsChannel": "clips",
   "connections": [
 
   ]

@@ -1,40 +1,66 @@
 const envResult =  require('dotenv').config()
 const botUtils = require('./botUtils');
+const ta = require('./twitchApi');
 const fs = require('fs');
 var path = require('path');
 const botconfigdefault = require("./botconfig-default.json");
 const Discord = require("discord.js");
 const tmi = require('tmi.js')
-
-if(envResult.error)
-{
-  //Do nothing probably a docker build
-}
+const db = require('diskdb');
 
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
 const TWITCH_AUTH = process.env.TWITCH_AUTH;
 const TWITCH_CLIENT_ID = process.env.TWITCH_CLIENT_ID;
+const LOG_LEVEL = process.env.LOG_LEVEL ? process.env.LOG_LEVEL : 'info';
 
 //Server Path
 let configPath = process.env.CONFIG_PATH;
+let logPath = process.env.LOG_PATH;
+
 if(configPath == null)
 {
-  //Local path
-  configPath = "../data/";
+  //Local paths
+  configPath = "../data";
+  logPath = "../logs"
 }
 
-const configFileName = configPath + "botconfig.json";
+const log4js = require('log4js');
+log4js.configure({
+  appenders: { 
+    app: { type: 'file', filename: path.resolve(__dirname,logPath + '/pojaid.log') }, 
+    out: { type: 'stdout' } 
+  },
+  categories: { 
+    default: { appenders: ['app', 'out'], level: LOG_LEVEL } 
+  }
+});
+const logger = log4js.getLogger('pojaid');
+
+ta.initialise(logger, db.connect(configPath, ['clips']));
+
+if(envResult.error)
+{
+  logger.warn(envResult.error);
+  //Do nothing probably a docker build
+}
+
+const configFileName = configPath + "/botconfig.json";
 if (!fs.existsSync(path.resolve(__dirname,configFileName))) {
-  console.log(`${configFileName} does not exist, copying defaults`);
+  logger.info(`${configFileName} does not exist, copying defaults`);
   try {
     fs.copyFileSync(path.resolve(__dirname,'./botconfig-default.json'), path.resolve(__dirname,configFileName));
-    console.log(`Copied default config to ${configFileName}`);
+    logger.info(`Copied default config to ${configFileName}`);
   } catch (err) {
-    console.error(err)
+    logger.error(err)
   }
 }
 
 const botconfig = require(configFileName);
+// Backwards compatability
+if(botconfig.defaultClipsChannel == null)
+{
+  botconfig.defaultClipsChannel = "clips";
+}
 
 let discordBot = new Discord.Client({disableEveryone:true});
 
@@ -46,7 +72,10 @@ let twitchClient = null;
 let twitchChannels = new Array();
 
 function initialiseTwitch() {
-
+  
+  //Because twitch mess's with our perfectly good array
+  let channels = twitchChannels.slice();
+  
   opts = {
     options:{
       clientId: TWITCH_CLIENT_ID
@@ -58,7 +87,7 @@ function initialiseTwitch() {
       username: botconfig.twitchUsername,
       password: TWITCH_AUTH
     },
-    channels: twitchChannels  
+    channels: channels  
   }
   twitchClient = new tmi.client(opts);
 
@@ -67,9 +96,38 @@ function initialiseTwitch() {
   twitchClient.on('connected', onTwitchConnectedHandler)
   twitchClient.on('disconnected', onTwitchDisconnectedHandler)
 
-  console.log("Connecting to twitch");
+  logger.info("Connecting to twitch");
   twitchClient.connect();
+  try{
+    twitchChannels.forEach(e => {
+      scheduleTwitchClips(e);
+    });
+  }
+  catch(err)
+  {
+    logger.error(err);
+  }
 }
+
+function scheduleTwitchClips(channel)
+{
+  chn = channel.replace('#', '');
+  logger.debug("Schedulling clips for Twitch Channel = " + chn);
+  ta.scheduleClips(twitchClient, TWITCH_CLIENT_ID, channel, '*/15 * * * *', function(clip){
+    //TODO: Simplify this
+    let con = connections.get(channel);
+    if(!con.discordClipsChannelId)
+    {    
+      let chan = discordBot.guilds.get(con.discordGuild).channels.find('name', con.discordClipsChannel != null ? con.discordClipsChannel: "clips");
+      con.discordChannelId = chan.id;
+      logger.info(`Set channelId to ${chan.id} `);
+    }
+
+    discordBot.guilds.get(con.discordGuild).channels.get(con.discordChannelId).send(`${clip.title}: ${clip.url}`);
+  });
+}
+
+
 
 // Called every time a message comes in:
 function onTwitchMessageHandler (target, context, msg, self) {
@@ -84,7 +142,7 @@ function onTwitchMessageHandler (target, context, msg, self) {
     {
       let chan = discordBot.guilds.get(con.discordGuild).channels.find('name', con.discordChannel);
       con.discordChannelId = chan.id;
-      console.log(`Set channelId to ${chan.id} `);
+      logger.info(`Set channelId to ${chan.id} `);
     }
 
     discordBot.guilds.get(con.discordGuild).channels.get(con.discordChannelId).send(`***${context.username}***: ${msg}`)
@@ -93,12 +151,12 @@ function onTwitchMessageHandler (target, context, msg, self) {
 
 // Called every time the bot connects to Twitch chat:
 function onTwitchConnectedHandler (addr, port) {
-  console.log(`* Connected to ${addr}:${port}`)
+  logger.info(`* Connected to ${addr}:${port}`)
 }
 
 // Called every time the bot disconnects from Twitch:
 function onTwitchDisconnectedHandler (reason) {
-  console.log(`Disconnected: ${reason}`)
+  logger.warn(`Disconnected: ${reason}`);
 }
 
 // Function called when the "echo" command is issued:
@@ -110,7 +168,7 @@ function echo (target, context, params) {
     // Send it back to the correct place:
     sendTwitchMessage(target, context, msg)
   } else { // Nothing to echo
-    console.log(`* Nothing to echo`)
+    logger.info(`* Nothing to echo`)
   }
 }
 
@@ -134,9 +192,11 @@ function updateConnections () {
   });  
 }
 
+discordBot.on('error', console.error);
+
 discordBot.on("ready", async () => {
-  console.log(`${discordBot.user.username} is online!`);
-  console.log(`Loading twitch conncetions...`);
+  logger.info(`${discordBot.user.username} is online!`);
+  logger.info(`Loading twitch conncetions...`);
   updateConnections();
   
   //Make sure all existing guilds have an entry in the connections config
@@ -146,7 +206,8 @@ discordBot.on("ready", async () => {
     {
       var newConnection = {
         discordGuild: g.id,
-        discordChannel: botconfig.defaultChatChannel
+        discordChannel: botconfig.defaultChatChannel,
+        clipsChannel: botconfig.defaultClipsChannel
       } 
       botconfig.connections.push(newConnection); 
       updateConfig('Updating ' + configFileName + ' with new discord connection ' + g.name);
@@ -157,8 +218,8 @@ discordBot.on("ready", async () => {
 });
 
 discordBot.on("guildCreate", async guild => {
-  console.log(`${discordBot.user.username} has joined ${guild.name}!`);
-  console.log(`Updating config file...`);
+  logger.info(`${discordBot.user.username} has joined ${guild.name}!`);
+  logger.info(`Updating config file...`);
   
   if(connections.get(guild.id) == null)
   {
@@ -217,6 +278,7 @@ function settwitch(target, object, params){
   
   let end = false;
   let dc = botconfig.defaultChatChannel;
+  let cc = botconfig.defaultClipsChannel;
 
   botconfig.connections.forEach(e => {
     if(e.discordGuild === object.guild.id)
@@ -224,47 +286,57 @@ function settwitch(target, object, params){
       end = true;
       if(e.twitchChannel)
       {
-        console.log('Leaving twitch channel ' + e.twitchChannel);
+        logger.info('Leaving twitch channel ' + e.twitchChannel);
         twitchClient.part(e.twitchChannel);
       }
      
       e.twitchChannel = params[0];
       if(params.length > 1)
-      {
         e.discordChannel = params[1];
-      }
+      if(params.length > 2)
+        e.clipsChannel = params[2];
       
     }
   });  
   
   if(!end)
   {
-    console.log("Couldn't find discord channel in config");
+    logger.info("Couldn't find discord channel in config");
     if(params.length > 1)
+    {
       dc = params[1];
+      if(params.length > 2)
+        cc = params[2];
+    }
     
     var newConnection = {
       twitchChannel: params[0],
       discordGuild: object.guild.id,
-      discordChannel: dc
+      discordChannel: dc,
+      clipsChannel: cc
     } 
     botconfig.connections.push(newConnection);   
   }
 
   //Join the channel
-  console.log('Joining twitch channel ' + params[0]);
+  logger.info('Joining twitch channel ' + params[0]);
   twitchClient.join(params[0]);
+  scheduleTwitchClips(params[0]);
   
   updateConfig('Updating ' + configFileName + ' with new twitch conncetion ' + params[0]);
 
-  return object.channel.send(`The twitch channel has been set to ${params[0]} messages will be posted in ${dc}` );
+  return object.channel.send(`The twitch channel has been set to ${params[0]} messages will be posted in ${dc} and clips will be posted in ${cc}` );
 }
 
 function updateConfig(note){
-  console.log(`Writing to ${path.resolve(__dirname,configFileName)}`)
+  logger.info(`Writing to ${path.resolve(__dirname,configFileName)}`)
   fs.writeFile(path.resolve(__dirname,configFileName), JSON.stringify(botconfig, null, 2), function (err) {
-    if (err) return console.log(err);
-    if(note) console.log(note);
+    if (err) 
+    {
+      logger.error(err); 
+      return;
+    }
+    if(note) logger.info(note);
     //Update all the data structures with the latest information.
     updateConnections();
   });

@@ -3,3 +3,4 @@ secret*.json
 .env
 .env_*
 data/*
+logs/*
